@@ -268,6 +268,11 @@ function handleInitialized(buf, filetype)
 	local uri = getUriFromBuf(buf)
 	local content = util.String(buf:Bytes()):gsub("\\", "\\\\"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub('"', '\\"'):gsub("\t", "\\t")
 	send("textDocument/didOpen", fmt.Sprintf('{"textDocument": {"uri": "%s", "languageId": "%s", "version": 1, "text": "%s"}}', uri, filetype, content), true)
+
+	if filetype == "fsharp" then
+		local directory = rootUri:gsub("file://", "")
+		send("fsharp/workspacePeek", fmt.Sprintf('{"directory": "%s", "deep": 4, "excludedDirs": [ ".git", "paket-files", ".fable", "packages", "node_modules" ], "$type": "WorkspacePeekRequest"}', directory), false)
+	end
 end
 
 function onBufferOpen(buf)
@@ -355,6 +360,8 @@ function onStdout(filetype)
 		end
 
 		micro.Log(filetype .. " <<< " .. (data.method or 'no method'))
+
+		micro.Log("DATA", data)
 		
 		if data.method == "workspace/configuration" then
 		    -- actually needs to respond with the same ID as the received JSON
@@ -385,10 +392,16 @@ function onStdout(filetype)
 			end
 		elseif currentAction[filetype] and currentAction[filetype].method and not data.method and currentAction[filetype].response and data.jsonrpc then			-- react to custom action event
 			local bp = micro.CurPane()
-			micro.Log("Received message for ", filetype, data)
+			micro.Log("Received message for", filetype, currentAction[filetype].method, ":" ,data)
 			currentAction[filetype].response(bp, data)
 			currentAction[filetype] = {}
-		elseif data.method == "window/showMessage" or data.method == "window\\/showMessage" then
+
+			if data["error"] ~= nil then
+			  local error = data.error
+			  micro.InfoBar():Message(error.code, " ", error.message)
+			end     
+			
+		elseif data.method == "window/showMessage" or data.method == "window\\/showMessage" or data.method == "window/showMessageRequest" then
 			if filetype == micro.CurPane().Buf:FileType() then
 				micro.InfoBar():Message(data.params.message)
 			else
@@ -396,6 +409,30 @@ function onStdout(filetype)
 			end
 		elseif data.method == "window/logMessage" or data.method == "window\\/logMessage" then
 			micro.Log(data.params.message)
+		elseif data.method == "fsharp/notifyWorkspace" or data.method == "fsharp/testDetected" or data.method == "fsharp/fileParsed" or data.method == "fsharp/documentAnalyzed" then
+			-- ignore for now (possibly move to the default config if no use for those)
+			micro.Log("Done nothing for", data.method)
+		elseif filetype == "fsharp" and data["result"] ~= nil and data.result["content"] ~= nil then
+			local body = data.result.content:gsub("\\\"", "\"")
+			local json = json.parse(body, 1, '}')
+
+			if json.Kind == "workspacePeek" then
+				if next(json.Data.Found) ~= nil then
+					-- as for now we always just pick whatever first is returned
+					local found = json.Data.Found[1]
+					local send = withSend(filetype)
+					local projects = {}
+
+					if found.Type == "solution" then getProjects(found, projects)
+					elseif found.Type == "directory" then projects = found.Data.Fsprojs
+					end
+
+					-- micro.Log("PROJS:", projects)
+					local documents = next(projects) == nil and "" or fmt.Sprintf('{"Uri": "%s"}', projects[1])
+					local message = fmt.Sprintf('{"TextDocuments":[%s]}', documents)
+					send("fsharp/workspaceLoad", message, false)                 
+				end
+			end
 		elseif message:starts("Content-Length:") then
 			if message:find('"') and not message:find('"result":null') then
 				micro.Log("Unhandled message 1", filetype, message)
@@ -419,6 +456,26 @@ function onExit(filetype)
 		currentAction[filetype] = nil
 		cmd[filetype] = nil
 		micro.Log("ONEXIT", filetype, str)
+	end
+end
+
+function getProjects(data, out)
+	if next(data) == nil then
+		return {}
+	else
+		local key, value = next(data)
+		if type(value) == "table" then getProjects(value, out) end
+		-- micro.Log("+", key)
+		local rest = data
+		rest[key] = nil
+		-- micro.Log("______")
+		for k, v in pairs(rest) do
+			-- micro.Log(k, v)
+			if k == "Name" and string.find(v, "\.fsproj$") ~= nil then
+				table.insert(out, v)
+			end
+			if type(v) == "table" then getProjects(v, out) end
+		end
 	end
 end
 
