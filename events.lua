@@ -273,6 +273,8 @@ function onStdout(filetype)
 		elseif data.method == "fsharp/notifyWorkspace" or data.method == "fsharp/testDetected" or data.method == "fsharp/fileParsed" or data.method == "fsharp/documentAnalyzed" then
 			-- ignore for now (possibly move to the default config if no use for those)
 			micro.Log("Done nothing for", data.method)
+		elseif filetype == "fsharp" and data["result"] ~= nil and data.result["serverInfo"] ~= nil then
+			micro.Log("fsautocomplete: ", data.result["serverInfo"])
 		elseif filetype == "fsharp" and data["result"] ~= nil and data.result["content"] ~= nil then
 			local body = data.result.content:gsub("\\\"", "\"")
 			local json = json.parse(body, 1, '}')
