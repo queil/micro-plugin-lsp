@@ -325,3 +325,23 @@ function onExit(filetype)
 		micro.Log("ONEXIT", filetype, str)
 	end
 end
+
+function getProjects(data, out)
+	if next(data) == nil then
+		return {}
+	else
+		local key, value = next(data)
+		if type(value) == "table" then getProjects(value, out) end
+		-- micro.Log("+", key)
+		local rest = data
+		rest[key] = nil
+		-- micro.Log("______")
+		for k, v in pairs(rest) do
+			-- micro.Log(k, v)
+			if k == "Name" and string.find(v, "\.fsproj$") ~= nil then
+				table.insert(out, v)
+			end
+			if type(v) == "table" then getProjects(v, out) end
+		end
+	end
+end
