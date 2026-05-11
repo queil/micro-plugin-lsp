@@ -136,7 +136,7 @@ function completionActionResponse(bp, data)
 					-- try to find a trigger character or any other non-word character
 					if contains(triggerChars, char) or contains({ " ", ":", "/", "-", "\t", ";" }, char) then
 						found = true
-						start = buffer.Loc(#reversed - (i - 1), xy.Y)
+						start = buffer.Loc(#reversed - (i - 1), bp.Cursor.Y)
 						bp.Cursor:SetSelectionStart(start)
 						bp.Cursor:SetSelectionEnd(xy)
 						prefix = util.String(cur:GetSelection())
