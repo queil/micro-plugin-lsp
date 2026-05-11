@@ -193,122 +193,120 @@ function onBufferOpen(buf)
 	end
 end
 
+local buffers = {}
+
+local function dispatch(filetype, body)
+	local data = body:parse()
+	if data == false then
+		micro.Log('Parsing failed', body)
+		return
+	end
+
+	micro.Log(filetype .. " <<< " .. (data.method or 'no method'))
+
+	micro.Log("DATA", data)
+
+	if data.method == "workspace/configuration" then
+		-- actually needs to respond with the same ID as the received JSON
+		local message = fmt.Sprintf('{"jsonrpc": "2.0", "id": %.0f, "result": [{"enable": true}]}', data.id)
+		shell.JobSend(cmd[filetype], fmt.Sprintf('Content-Length: %.0f\n\n%s', #message, message))
+	elseif data.method == "textDocument/publishDiagnostics" or data.method == "textDocument\\/publishDiagnostics" then
+		-- react to server-published event
+		local bp = micro.CurPane().Buf
+		bp:ClearMessages("lsp")
+		bp:AddMessage(buffer.NewMessage("lsp", "", buffer.Loc(0, 10000000), buffer.Loc(0, 10000000), buffer.MTInfo))
+		local uri = getUriFromBuf(bp)
+		if data.params.uri == uri then
+			for _, diagnostic in ipairs(data.params.diagnostics) do
+				local type = buffer.MTInfo
+				if diagnostic.severity == 1 then
+					type = buffer.MTError
+				elseif diagnostic.severity == 2 then
+					type = buffer.MTWarning
+				end
+				local mstart = buffer.Loc(diagnostic.range.start.character, diagnostic.range.start.line)
+				local mend = buffer.Loc(diagnostic.range["end"].character, diagnostic.range["end"].line)
+
+				if not isIgnoredMessage(diagnostic.message) then
+					msg = buffer.NewMessage("lsp", diagnostic.message, mstart, mend, type)
+					bp:AddMessage(msg)
+				end
+			end
+		end
+	elseif currentAction[filetype] and currentAction[filetype].method and not data.method and currentAction[filetype].response and data.jsonrpc then -- react to custom action event
+		local bp = micro.CurPane()
+		micro.Log("Received message for", filetype, currentAction[filetype].method, ":" ,data)
+		currentAction[filetype].response(bp, data)
+		currentAction[filetype] = {}
+
+		if data["error"] ~= nil then
+			local error = data.error
+			micro.InfoBar():Message(error.code, " ", error.message)
+		end
+
+	elseif data.method == "window/showMessage" or data.method == "window\\/showMessage" or data.method == "window/showMessageRequest" then
+		if filetype == micro.CurPane().Buf:FileType() then
+			micro.InfoBar():Message(data.params.message)
+		else
+			micro.Log(filetype .. " message " .. data.params.message)
+		end
+	elseif data.method == "window/logMessage" or data.method == "window\\/logMessage" then
+		micro.Log(data.params.message)
+	elseif data.method == "fsharp/notifyWorkspace" or data.method == "fsharp/testDetected" or data.method == "fsharp/fileParsed" or data.method == "fsharp/documentAnalyzed" then
+		-- ignore for now (possibly move to the default config if no use for those)
+		micro.Log("Done nothing for", data.method)
+	elseif filetype == "fsharp" and data["result"] ~= nil and data.result["serverInfo"] ~= nil then
+		micro.Log("fsautocomplete: ", data.result["serverInfo"])
+	elseif filetype == "fsharp" and data["result"] ~= nil and data.result["content"] ~= nil then
+		local body = data.result.content:gsub("\\\"", "\"")
+		local json = json.parse(body, 1, '}')
+
+		if json.Kind == "workspacePeek" then
+			if next(json.Data.Found) ~= nil then
+				-- as for now we always just pick whatever first is returned
+				local found = json.Data.Found[1]
+				local send = withSend(filetype)
+				local projects = {}
+
+				if found.Type == "solution" then getProjects(found, projects)
+				elseif found.Type == "directory" then projects = found.Data.Fsprojs
+				end
+
+				-- micro.Log("PROJS:", projects)
+				local documents = next(projects) == nil and "" or fmt.Sprintf('{"Uri": "%s"}', projects[1])
+				local message = fmt.Sprintf('{"TextDocuments":[%s]}', documents)
+				send("fsharp/workspaceLoad", message, false)
+			end
+		end
+	elseif body:starts("Content-Length:") then
+		if body:find('"') and not body:find('"result":null') then
+			micro.Log("Unhandled message 1", filetype, body)
+		end
+	else
+		-- enable for debugging purposes
+		micro.Log("Unhandled message 2", filetype, body)
+	end
+end
+
 function onStdout(filetype)
-	local nextMessage = ''
+	buffers[filetype] = buffers[filetype] or ""
 	return function(text)
-		if text:starts("Content-Length:") then
-			message = text
-		else
-			message = message .. text
-		end
-		message = message:gsub('}Content%-Length:', '}\0Content-Length:')
-		local entries = mysplit(message, '\0')
-		if #entries > 1 then
-			micro.Log('Found break')
-			entries[1] = entries[1]
-			entries[2] = entries[2]
-			message = entries[1]
-			nextMessage = entries[2]
-		end
-		if not message:ends("}") then
-			micro.Log('Message incomplete, ignoring for now...')
-			return
-		end
-		local data = message:parse()
-		if data == false then
-			micro.Log('Parsing failed', message)
-			return
-		end
-
-		micro.Log(filetype .. " <<< " .. (data.method or 'no method'))
-
-		micro.Log("DATA", data)
-
-		if data.method == "workspace/configuration" then
-			-- actually needs to respond with the same ID as the received JSON
-			local message = fmt.Sprintf('{"jsonrpc": "2.0", "id": %.0f, "result": [{"enable": true}]}', data.id)
-			shell.JobSend(cmd[filetype], fmt.Sprintf('Content-Length: %.0f\n\n%s', #message, message))
-		elseif data.method == "textDocument/publishDiagnostics" or data.method == "textDocument\\/publishDiagnostics" then
-			-- react to server-published event
-			local bp = micro.CurPane().Buf
-			bp:ClearMessages("lsp")
-			bp:AddMessage(buffer.NewMessage("lsp", "", buffer.Loc(0, 10000000), buffer.Loc(0, 10000000), buffer.MTInfo))
-			local uri = getUriFromBuf(bp)
-			if data.params.uri == uri then
-				for _, diagnostic in ipairs(data.params.diagnostics) do
-					local type = buffer.MTInfo
-					if diagnostic.severity == 1 then
-						type = buffer.MTError
-					elseif diagnostic.severity == 2 then
-						type = buffer.MTWarning
-					end
-					local mstart = buffer.Loc(diagnostic.range.start.character, diagnostic.range.start.line)
-					local mend = buffer.Loc(diagnostic.range["end"].character, diagnostic.range["end"].line)
-
-					if not isIgnoredMessage(diagnostic.message) then
-						msg = buffer.NewMessage("lsp", diagnostic.message, mstart, mend, type)
-						bp:AddMessage(msg)
-					end
-				end
-			end
-		elseif currentAction[filetype] and currentAction[filetype].method and not data.method and currentAction[filetype].response and data.jsonrpc then -- react to custom action event
-			local bp = micro.CurPane()
-			micro.Log("Received message for", filetype, currentAction[filetype].method, ":" ,data)
-			currentAction[filetype].response(bp, data)
-			currentAction[filetype] = {}
-
-			if data["error"] ~= nil then
-				local error = data.error
-				micro.InfoBar():Message(error.code, " ", error.message)
-			end
-
-		elseif data.method == "window/showMessage" or data.method == "window\\/showMessage" or data.method == "window/showMessageRequest" then
-			if filetype == micro.CurPane().Buf:FileType() then
-				micro.InfoBar():Message(data.params.message)
-			else
-				micro.Log(filetype .. " message " .. data.params.message)
-			end
-		elseif data.method == "window/logMessage" or data.method == "window\\/logMessage" then
-			micro.Log(data.params.message)
-		elseif data.method == "fsharp/notifyWorkspace" or data.method == "fsharp/testDetected" or data.method == "fsharp/fileParsed" or data.method == "fsharp/documentAnalyzed" then
-			-- ignore for now (possibly move to the default config if no use for those)
-			micro.Log("Done nothing for", data.method)
-		elseif filetype == "fsharp" and data["result"] ~= nil and data.result["serverInfo"] ~= nil then
-			micro.Log("fsautocomplete: ", data.result["serverInfo"])
-		elseif filetype == "fsharp" and data["result"] ~= nil and data.result["content"] ~= nil then
-			local body = data.result.content:gsub("\\\"", "\"")
-			local json = json.parse(body, 1, '}')
-
-			if json.Kind == "workspacePeek" then
-				if next(json.Data.Found) ~= nil then
-					-- as for now we always just pick whatever first is returned
-					local found = json.Data.Found[1]
-					local send = withSend(filetype)
-					local projects = {}
-
-					if found.Type == "solution" then getProjects(found, projects)
-					elseif found.Type == "directory" then projects = found.Data.Fsprojs
-					end
-
-					-- micro.Log("PROJS:", projects)
-					local documents = next(projects) == nil and "" or fmt.Sprintf('{"Uri": "%s"}', projects[1])
-					local message = fmt.Sprintf('{"TextDocuments":[%s]}', documents)
-					send("fsharp/workspaceLoad", message, false)
-				end
-			end
-		elseif message:starts("Content-Length:") then
-			if message:find('"') and not message:find('"result":null') then
-				micro.Log("Unhandled message 1", filetype, message)
-			end
-		else
-			-- enable for debugging purposes
-			micro.Log("Unhandled message 2", filetype, message)
-		end
-
-		if nextMessage then
-			local nm = nextMessage
-			nextMessage = nil
-			onStdout(filetype)(nm)
+		buffers[filetype] = buffers[filetype] .. text
+		while true do
+			local buf = buffers[filetype]
+			local _, clen_end, clen = buf:find("Content%-Length:%s*(%d+)")
+			if not clen then break end
+			local sep_rn = buf:find("\r\n\r\n", clen_end, true)
+			local sep_n  = buf:find("\n\n", clen_end, true)
+			local body_start
+			if sep_rn then body_start = sep_rn + 4
+			elseif sep_n then body_start = sep_n + 2
+			else break end
+			local body_len = tonumber(clen)
+			if #buf < body_start + body_len - 1 then break end  -- need more bytes
+			local body = buf:sub(body_start, body_start + body_len - 1)
+			buffers[filetype] = buf:sub(body_start + body_len)
+			dispatch(filetype, body)
 		end
 	end
 end
