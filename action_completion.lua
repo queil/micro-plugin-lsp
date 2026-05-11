@@ -140,7 +140,6 @@ function completionActionResponse(bp, data)
 						bp.Cursor:SetSelectionStart(start)
 						bp.Cursor:SetSelectionEnd(xy)
 						prefix = util.String(cur:GetSelection())
-						bp.Cursor:DeleteSelection()
 						bp.Cursor:ResetSelection()
 						break
 					end
@@ -178,6 +177,14 @@ function completionActionResponse(bp, data)
 					bp.Cursor:ResetSelection()
 				end
 			end
+		end
+		if #prefix > 0 then
+			xy = buffer.Loc(bp.Cursor.X, bp.Cursor.Y)
+			local nstart = buffer.Loc(bp.Cursor.X - #prefix, bp.Cursor.Y)
+			bp.Cursor:GotoLoc(nstart)
+			bp.Cursor:SetSelectionStart(nstart)
+			bp.Cursor:SetSelectionEnd(xy)
+			bp.Cursor:DeleteSelection()
 		end
 		bp.Buf:Autocomplete(buffer_complete)
 		local xy = buffer.Loc(bp.Cursor.X + #prefix, bp.Cursor.Y)
