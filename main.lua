@@ -17,7 +17,6 @@ rootUri = ''
 
 local id = {}
 local filetype = ''
-local message = ''
 local splitBP = nil
 local tabCount = 0
 
