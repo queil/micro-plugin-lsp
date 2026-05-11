@@ -140,6 +140,7 @@ function completionActionResponse(bp, data)
 						bp.Cursor:SetSelectionStart(start)
 						bp.Cursor:SetSelectionEnd(xy)
 						prefix = util.String(cur:GetSelection())
+						bp.Cursor:DeleteSelection()
 						bp.Cursor:ResetSelection()
 						break
 					end
