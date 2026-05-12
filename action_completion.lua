@@ -117,7 +117,6 @@ function completionActionResponse(bp, data)
 		local originalStart = start
 		if bp.Cursor:HasSelection() then
 			bp.Cursor:DeleteSelection()
-			xy = buffer.Loc(bp.Cursor.X, bp.Cursor.Y)
 		end
 		local prefix = ""
 		local reversed = ""
