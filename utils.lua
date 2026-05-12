@@ -23,9 +23,62 @@ function mysplit(inputstr, sep)
 		sep = "%s"
 	end
 	local t = {}
-	for str in string.gmatch(inputstr, "([^" .. sep .. "]+)") do
-		table.insert(t, str)
+	
+	-- Special handling for comma separator to respect JSON strings
+	if sep == "," then
+		local i = 1
+		local start = 1
+		local in_string = false
+		local in_escape = false
+		local brace_depth = 0
+		local bracket_depth = 0
+		
+		while i <= #inputstr do
+			local char = inputstr:sub(i, i)
+			
+			-- Handle escape sequences
+			if in_escape then
+				in_escape = false
+			elseif char == "\\" and in_string then
+				in_escape = true
+			-- Handle string boundaries
+			elseif char == '"' and not in_escape then
+				in_string = not in_string
+			-- Track JSON object/array nesting
+			elseif not in_string then
+				if char == "{" then
+					brace_depth = brace_depth + 1
+				elseif char == "}" then
+					brace_depth = brace_depth - 1
+				elseif char == "[" then
+					bracket_depth = bracket_depth + 1
+				elseif char == "]" then
+					bracket_depth = bracket_depth - 1
+				-- Split only if we're not inside strings or JSON structures
+				elseif char == sep and brace_depth == 0 and bracket_depth == 0 then
+					local part = inputstr:sub(start, i - 1):match("^%s*(.-)%s*$")
+					if part ~= "" then
+						table.insert(t, part)
+					end
+					start = i + 1
+				end
+			end
+			
+			i = i + 1
+		end
+		
+		-- Add the last part
+		local part = inputstr:sub(start):match("^%s*(.-)%s*$")
+		if part ~= "" then
+			table.insert(t, part)
+		end
+	else
+		-- Original logic for other separators
+		for str in string.gmatch(inputstr, "([^" .. sep .. "]+)") do
+			table.insert(t, str)
+		end
 	end
+	
 	return t
 end
 

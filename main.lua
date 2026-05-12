@@ -17,7 +17,6 @@ rootUri = ''
 
 local id = {}
 local filetype = ''
-local message = ''
 local splitBP = nil
 local tabCount = 0
 
@@ -124,6 +123,11 @@ function handleInitialized(buf, filetype)
 	send("textDocument/didOpen",
 		fmt.Sprintf('{"textDocument": {"uri": "%s", "languageId": "%s", "version": 1, "text": "%s"}}', uri, filetype,
 			content), true)
+	
+	if filetype == "fsharp" then
+		local directory = rootUri:gsub("file://", "")
+		send("fsharp/workspacePeek", fmt.Sprintf('{"directory": "%s", "deep": 4, "excludedDirs": [ ".git", "paket-files", ".fable", "packages", "node_modules" ], "$type": "WorkspacePeekRequest"}', directory), false)
+	end
 end
 
 function isIgnoredMessage(msg)
