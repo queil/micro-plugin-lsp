@@ -7,6 +7,7 @@ local fmt = import("fmt")
 local lastCompletion = {}
 local completionCursor = 0
 local doAutoCompletion = nil
+local lastCompletionRange = nil
 
 function completionAction(bp)
 	local filetype = bp.Buf:FileType()
@@ -19,6 +20,7 @@ function completionAction(bp)
 		completionCursor = completionCursor + 1
 	else
 		completionCursor = 0
+		lastCompletionRange = nil
 		if bp.Cursor:HasSelection() then
 			-- we have a selection
 			-- assume we want to indent the selection
@@ -114,11 +116,14 @@ function completionActionResponse(bp, data)
 
 		local xy = buffer.Loc(bp.Cursor.X, bp.Cursor.Y)
 		local start = xy
-		local originalStart = start
-		micro.Log(fmt.Sprintf("AC[%d] ENTRY cursor=%d,%d hasSel=%s", completionCursor, bp.Cursor.X, bp.Cursor.Y, tostring(bp.Cursor:HasSelection())))
-		if bp.Cursor:HasSelection() then
-			micro.Log(fmt.Sprintf("AC[%d] SEL before delete: xy=%d,%d", completionCursor, xy.X, xy.Y))
+		micro.Log(fmt.Sprintf("AC[%d] ENTRY cursor=%d,%d hasRange=%s", completionCursor, bp.Cursor.X, bp.Cursor.Y, tostring(lastCompletionRange ~= nil)))
+		if lastCompletionRange ~= nil then
+			micro.Log(fmt.Sprintf("AC[%d] RANGE delete [%d,%d]->[%d,%d]", completionCursor, lastCompletionRange[1].X, lastCompletionRange[1].Y, lastCompletionRange[2].X, lastCompletionRange[2].Y))
+			bp.Cursor:SetSelectionStart(lastCompletionRange[1])
+			bp.Cursor:SetSelectionEnd(lastCompletionRange[2])
 			bp.Cursor:DeleteSelection()
+			xy = buffer.Loc(bp.Cursor.X, bp.Cursor.Y)
+			lastCompletionRange = nil
 			micro.Log(fmt.Sprintf("AC[%d] AFTER delete: cursor=%d,%d", completionCursor, bp.Cursor.X, bp.Cursor.Y))
 		end
 		local prefix = ""
@@ -146,7 +151,6 @@ function completionActionResponse(bp, data)
 						bp.Cursor:SetSelectionStart(start)
 						bp.Cursor:SetSelectionEnd(xy)
 						prefix = util.String(cur:GetSelection())
-						bp.Cursor:DeleteSelection()
 						bp.Cursor:ResetSelection()
 						break
 					end
@@ -188,21 +192,21 @@ function completionActionResponse(bp, data)
 				end
 			end
 		end
+		bp.Cursor:GotoLoc(start)
 		if #prefix > 0 then
-			xy = buffer.Loc(bp.Cursor.X, bp.Cursor.Y)
-			local nstart = buffer.Loc(bp.Cursor.X - #prefix, bp.Cursor.Y)
-			bp.Cursor:GotoLoc(nstart)
-			bp.Cursor:SetSelectionStart(nstart)
-			bp.Cursor:SetSelectionEnd(xy)
+			bp.Cursor:SetSelectionStart(start)
+			bp.Cursor:SetSelectionEnd(buffer.Loc(start.X + #prefix, start.Y))
 			bp.Cursor:DeleteSelection()
 		end
 		micro.Log(fmt.Sprintf("AC[%d] pre-Autocomplete cursor=%d,%d prefix='%s'", completionCursor, bp.Cursor.X, bp.Cursor.Y, prefix))
 		bp.Buf:Autocomplete(buffer_complete)
-		local xy = buffer.Loc(bp.Cursor.X + #prefix, bp.Cursor.Y)
-		micro.Log(fmt.Sprintf("AC[%d] post-Autocomplete cursor=%d,%d new xy=%d,%d originalStart=%d,%d start=%d,%d", completionCursor, bp.Cursor.X, bp.Cursor.Y, xy.X, xy.Y, originalStart.X, originalStart.Y, start.X, start.Y))
-		bp.Cursor:GotoLoc(originalStart)
-		bp.Cursor:SetSelectionStart(start)
-		bp.Cursor:SetSelectionEnd(xy)
+		local xy = buffer.Loc(bp.Cursor.X, bp.Cursor.Y)
+		micro.Log(fmt.Sprintf("AC[%d] post-Autocomplete cursor=%d,%d xy=%d,%d start=%d,%d", completionCursor, bp.Cursor.X, bp.Cursor.Y, xy.X, xy.Y, start.X, start.Y))
+		lastCompletion[3] = xy.X
+		lastCompletionRange = {start, xy}
+		bp.Cursor:GotoLoc(xy)
+		bp.Cursor:ResetSelection()
+		onRune(bp)
 
 		local msg = ''
 		local insertion = ''
