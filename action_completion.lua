@@ -115,8 +115,11 @@ function completionActionResponse(bp, data)
 		local xy = buffer.Loc(bp.Cursor.X, bp.Cursor.Y)
 		local start = xy
 		local originalStart = start
+		micro.Log(fmt.Sprintf("AC[%d] ENTRY cursor=%d,%d hasSel=%s", completionCursor, bp.Cursor.X, bp.Cursor.Y, tostring(bp.Cursor:HasSelection())))
 		if bp.Cursor:HasSelection() then
+			micro.Log(fmt.Sprintf("AC[%d] SEL before delete: xy=%d,%d", completionCursor, xy.X, xy.Y))
 			bp.Cursor:DeleteSelection()
+			micro.Log(fmt.Sprintf("AC[%d] AFTER delete: cursor=%d,%d", completionCursor, bp.Cursor.X, bp.Cursor.Y))
 		end
 		local prefix = ""
 		local reversed = ""
@@ -125,11 +128,13 @@ function completionActionResponse(bp, data)
 		-- if we have no defined ranges in the result
 		-- try to find out what our prefix is we want to filter against
 		if not results[1] or not results[1].textEdit or not results[1].textEdit.range then
+			micro.Log(fmt.Sprintf("AC[%d] PATH1 (no textEdit range)", completionCursor))
 			if capabilities[bp.Buf:FileType()] and capabilities[bp.Buf:FileType()].completionProvider and capabilities[bp.Buf:FileType()].completionProvider.triggerCharacters then
 				local cur = bp.Buf:GetActiveCursor()
 				cur:SelectLine()
 				local lineContent = util.String(cur:GetSelection())
 				reversed = string.reverse(lineContent:gsub("\r?\n$", ""):sub(1, xy.X))
+				micro.Log(fmt.Sprintf("AC[%d] reversed='%s' xy.X=%d", completionCursor, reversed, xy.X))
 				local triggerChars = capabilities[bp.Buf:FileType()].completionProvider.triggerCharacters
 				for i = 1, #reversed, 1 do
 					local char = reversed:sub(i, i)
@@ -137,6 +142,7 @@ function completionActionResponse(bp, data)
 					if contains(triggerChars, char) or contains({ " ", ":", "/", "-", "\t", ";" }, char) then
 						found = true
 						start = buffer.Loc(#reversed - (i - 1), bp.Cursor.Y)
+						micro.Log(fmt.Sprintf("AC[%d] trigger found i=%d start=%d,%d xy=%d,%d", completionCursor, i, start.X, start.Y, xy.X, xy.Y))
 						bp.Cursor:SetSelectionStart(start)
 						bp.Cursor:SetSelectionEnd(xy)
 						prefix = util.String(cur:GetSelection())
@@ -157,11 +163,14 @@ function completionActionResponse(bp, data)
 				end)
 			end
 		else
+			micro.Log(fmt.Sprintf("AC[%d] PATH3 (textEdit range) entry=%s xy=%d,%d cursor=%d,%d", completionCursor, tostring(entry ~= nil), xy.X, xy.Y, bp.Cursor.X, bp.Cursor.Y))
 			if entry and (entry.textEdit and entry.textEdit.range) then
 				start = buffer.Loc(entry.textEdit.range.start.character, entry.textEdit.range.start.line)
+				micro.Log(fmt.Sprintf("AC[%d] PATH3 range start=%d,%d sel=[%d,%d]->[%d,%d]", completionCursor, start.X, start.Y, start.X, start.Y, xy.X, xy.Y))
 				bp.Cursor:SetSelectionStart(start)
 				bp.Cursor:SetSelectionEnd(xy)
 				bp.Cursor:DeleteSelection()
+				micro.Log(fmt.Sprintf("AC[%d] PATH3 after delete cursor=%d,%d", completionCursor, bp.Cursor.X, bp.Cursor.Y))
 				bp.Cursor:ResetSelection()
 			elseif capabilities[bp.Buf:FileType()] and capabilities[bp.Buf:FileType()].completionProvider and capabilities[bp.Buf:FileType()].completionProvider.triggerCharacters then
 				if not found then
@@ -187,8 +196,10 @@ function completionActionResponse(bp, data)
 			bp.Cursor:SetSelectionEnd(xy)
 			bp.Cursor:DeleteSelection()
 		end
+		micro.Log(fmt.Sprintf("AC[%d] pre-Autocomplete cursor=%d,%d prefix='%s'", completionCursor, bp.Cursor.X, bp.Cursor.Y, prefix))
 		bp.Buf:Autocomplete(buffer_complete)
 		local xy = buffer.Loc(bp.Cursor.X + #prefix, bp.Cursor.Y)
+		micro.Log(fmt.Sprintf("AC[%d] post-Autocomplete cursor=%d,%d new xy=%d,%d originalStart=%d,%d start=%d,%d", completionCursor, bp.Cursor.X, bp.Cursor.Y, xy.X, xy.Y, originalStart.X, originalStart.Y, start.X, start.Y))
 		bp.Cursor:GotoLoc(originalStart)
 		bp.Cursor:SetSelectionStart(start)
 		bp.Cursor:SetSelectionEnd(xy)
